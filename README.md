@@ -2,155 +2,218 @@
 
 Internal app to manage contractual employees, monthly invoices, and vendor spend.
 
-Built on Azure Static Web Apps + managed Azure Functions + Azure SQL — same blueprint as the Marketing Task Hub.
+Built on Azure Static Web Apps + managed Azure Functions + Azure SQL.
 
 ## Stack
 
 - **Frontend** — React 18 + Vite + React Router + Recharts (`/web`)
 - **Backend** — Azure Functions Node.js v4 model (`/api`)
 - **Database** — Azure SQL (wide-format `Contractors` table — see `sql/schema.sql`)
-- **Auth** — Microsoft Entra ID (built into SWA), four roles: `Admin`, `FinanceSPOC`, `Recruiter`, `Viewer`
-- **Storage** — Blob (optional, for keeping copies of imported xlsx files)
+- **Auth** — Custom username/password via JWT in HTTP-only cookies. Four roles: `Admin`, `FinanceSPOC`, `Recruiter`, `Viewer`.
 
 ## Roles
 
-| Role         | List | Read | Create | Edit             | Delete | Import | Export | Audit |
-|--------------|:----:|:----:|:------:|------------------|:------:|:------:|:------:|:-----:|
-| Admin        | ✅   | ✅   | ✅     | all columns      | ✅     | ✅     | ✅     | ✅    |
-| FinanceSPOC  | ✅   | ✅   | ✅     | finance + months | ❌     | ❌     | ✅     | ❌    |
-| Recruiter    | ✅   | ✅   | ✅     | recruiter cols   | ❌     | ❌     | ❌     | ❌    |
-| Viewer       | ✅   | ✅   | ❌     | —                | ❌     | ❌     | ❌     | ❌    |
+| Role         | List | Read | Create | Edit             | Delete | Import | Export | Audit | Manage users |
+|--------------|:----:|:----:|:------:|------------------|:------:|:------:|:------:|:-----:|:------------:|
+| Admin        | ✅   | ✅   | ✅     | all columns      | ✅     | ✅     | ✅     | ✅    | ✅           |
+| FinanceSPOC  | ✅   | ✅   | ✅     | finance + months | ❌     | ❌     | ✅     | ❌    | ❌           |
+| Recruiter    | ✅   | ✅   | ✅     | recruiter cols   | ❌     | ❌     | ❌     | ❌    | ❌           |
+| Viewer       | ✅   | ✅   | ❌     | —                | ❌     | ❌     | ❌     | ❌    | ❌           |
 
 Column-level enforcement happens in `api/src/shared/columns.js`.
 
-## Local development
+---
+
+## First-time setup
 
 ### 1. Database
 
-```bash
-# Either: connect to your Azure SQL DB via Azure Data Studio
-# Or: run a local SQL Server (sqlcmd / Docker)
-sqlcmd -S <server> -d ContractorDB -U <user> -P <pwd> -i sql/schema.sql
+Connect to your Azure SQL DB (Azure Portal Query Editor or Azure Data Studio), then:
+
+1. Run `sql/schema.sql` (creates tables, indexes, view, seed lookups). Skip if already done.
+2. Run `sql/migrations/001_add_password_columns.sql` (adds password columns to `AppUsers`).
+
+The migration is idempotent — safe to re-run.
+
+### 2. JWT secret
+
+Generate a random 32+ character string for signing tokens. PowerShell:
+
+```powershell
+[Convert]::ToBase64String([byte[]](1..48 | %{ Get-Random -Maximum 256 }))
 ```
 
-### 2. API (Functions)
+Bash / WSL:
+
+```bash
+openssl rand -base64 48
+```
+
+Save it — you'll set it as an app setting (`JWT_SECRET`) both locally and in Azure.
+
+### 3. API (local dev)
 
 ```bash
 cd api
 npm install
 cp local.settings.json.example local.settings.json
-# Edit local.settings.json: set SQL_CONN to your connection string
+# Edit local.settings.json:
+#   - SQL_CONN  → your Azure SQL connection string
+#   - JWT_SECRET → the secret you just generated
+#   - leave NODE_ENV=development for local (drops Secure flag from cookies)
 
-# Run Functions on :7071
-npm start
+npm start              # Functions runtime on http://localhost:7071
 ```
 
-### 3. Web (Vite)
+### 4. Web (local dev)
 
 ```bash
 cd web
 npm install
-npm run dev          # http://localhost:5173
 ```
 
-For full local SWA experience (auth + role emulation), use the SWA CLI:
+Then start everything together via the SWA CLI (recommended — proxies cookies cleanly):
 
 ```bash
 npm install -g @azure/static-web-apps-cli
-swa start http://localhost:5173 --api-location ../api --run "npm run dev"
-# Then open http://localhost:4280
+swa start http://localhost:5173 --api-location ./api --run "cd web && npm run dev"
+# Open http://localhost:4280
 ```
 
-The SWA CLI lets you fake roles via `?clientPrincipal=...` or via the built-in
-emulator login at `/.auth/login/aad?provider=aad`.
+### 5. Bootstrap the first admin
+
+The app has no users yet. Create the first admin via the bootstrap endpoint
+(this only works while `dbo.AppUsers` is empty):
+
+```powershell
+$body = @{ email='you@celebal.com'; password='ChooseAStrongPassword123!'; displayName='Your Name' } | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:4280/api/auth/bootstrap -Method POST `
+  -Body $body -ContentType 'application/json'
+```
+
+Or curl:
+
+```bash
+curl -X POST http://localhost:4280/api/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@celebal.com","password":"ChooseAStrongPassword123!","displayName":"Your Name"}'
+```
+
+You should get back `{ email, role: "Admin", message: "Bootstrap complete..." }`.
+
+Now open http://localhost:4280 and sign in with that email + password.
+
+### 6. Add team members
+
+Once you're logged in as Admin, go to the **Users** page in the sidebar:
+
+- Click **+ New user** → enter their email, name, role
+- The system generates a 14-character temp password and shows it once
+- Share it with the user (Teams DM, password manager — not over email)
+- They'll be forced to change it on first login
+
+To reset someone's password later, click **Reset password** on their row.
+
+---
 
 ## Azure deployment
 
 ### Provision (one-time)
 
-```bash
-RG=rg-contractor-app
-LOC=centralindia
-SQLSERVER=sql-contractor-$RANDOM
+```powershell
+$RG        = "rg-contractor-app"
+$LOC       = "centralindia"
+$SQLSERVER = "<your-existing-sql-server>"
 
-az group create -n $RG -l $LOC
-
-# Azure SQL
-az sql server create -n $SQLSERVER -g $RG -u sqladmin -p '<strong-pwd>' -l $LOC
-az sql db create -n ContractorDB -g $RG -s $SQLSERVER --service-objective S0
-az sql server firewall-rule create -g $RG -s $SQLSERVER -n AllowAzure \
-  --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0
-
-# Static Web App (binds to your GitHub repo, sets up CI/CD)
-az staticwebapp create -n swa-contractor-app -g $RG \
-  -s https://github.com/<org>/contractor-app -b main \
-  --app-location "/web" --api-location "/api" --output-location "dist" \
+# Static Web App (binds to your GitHub repo for CI/CD)
+az staticwebapp create -n swa-contractor-app -g $RG `
+  -s https://github.com/<org>/contractor-app -b main `
+  --app-location "/web" --api-location "/api" --output-location "dist" `
   --login-with-github
 ```
 
-### App settings (Functions environment)
+### App settings
 
-```bash
-az staticwebapp appsettings set -n swa-contractor-app --setting-names \
-  "SQL_CONN=Server=tcp:$SQLSERVER.database.windows.net,1433;Database=ContractorDB;User Id=sqladmin;Password=<pwd>;Encrypt=true;Connection Timeout=30" \
-  "AAD_CLIENT_ID=<app-registration-client-id>" \
-  "AAD_CLIENT_SECRET=<app-registration-secret>"
+```powershell
+az staticwebapp appsettings set -n swa-contractor-app -g $RG --setting-names `
+  "SQL_CONN=Server=tcp:$SQLSERVER.database.windows.net,1433;Database=ContractorDB;User Id=sqladmin;Password=<pwd>;Encrypt=true;Connection Timeout=30" `
+  "JWT_SECRET=<your-32-plus-char-random-string>"
 ```
 
-### Entra ID app registration
+**Don't set NODE_ENV** in production — its absence keeps cookies `Secure` (HTTPS only).
 
-1. Azure Portal → Microsoft Entra ID → App registrations → New
-2. Redirect URI: `https://<swa-default-hostname>.azurestaticapps.net/.auth/login/aad/callback`
-3. Certificates & secrets → New client secret → copy value into `AAD_CLIENT_SECRET`
-4. Update the `<tenant-id>` placeholder in `staticwebapp.config.json`
+After CI/CD finishes the first deploy, hit your `/api/auth/bootstrap` endpoint once
+(same call as step 5 above, just with the production hostname) to create the first admin.
 
-### Assigning user roles
-
-In the Azure Portal → your Static Web App → Role management:
-
-- **Invitation** → email + comma-separated roles (e.g. `Admin`) → send link
-- Or set up a *roles function* to assign roles based on AD group membership (more scalable for larger teams)
+---
 
 ## Architecture
 
 ```
 Browser
    │ (HTTPS)
-Azure Static Web App  ─── Entra ID (auth)
+Azure Static Web App (React)
    │
-Managed Azure Functions  ─── Blob (Excel imports, optional)
-   │                     ─── App Insights (logs/metrics)
+Managed Azure Functions    →  Blob (optional, for Excel imports)
+   │                       →  App Insights (logs/metrics)
    ▼
-Azure SQL Database (Contractors, AuditLog, Vendors, Entities, AppUsers)
+Azure SQL Database (Contractors, AuditLog, AppUsers, Vendors, Entities)
 ```
+
+Auth flow: client posts to `/api/auth/login` with email+password → server verifies bcrypt
+hash → issues JWT (8h expiry) → returns `Set-Cookie: cnt_token=...; HttpOnly; SameSite=Lax`.
+Browser sends cookie automatically on every subsequent request. Logout clears the cookie.
 
 ## File map
 
 ```
 api/
   src/
-    functions/        HTTP triggers — one file per resource
+    functions/
+      auth.js             login / logout / me / change-password / bootstrap
+      users.js            user management (Admin only)
+      contractors.js      CRUD with audit
+      lookups.js          vendors, entities
+      dashboard.js        aggregates
+      audit.js            change history per HRMID
+      importExcel.js      bulk upsert from xlsx
+      exportExcel.js      download as xlsx
     shared/
-      auth.js         decode SWA principal header
-      columns.js      column whitelists per role
-      audit.js        write per-column diffs to AuditLog
-      db.js           mssql pool
+      auth.js             JWT principal extraction + role check
+      jwt.js              sign/verify
+      passwords.js        bcrypt hash/compare
+      cookies.js          parse + Set-Cookie
+      columns.js          column whitelists per role
+      audit.js            per-column diff writer
+      db.js               mssql pool
 
 web/
   src/
-    pages/            ContractorsList, ContractorDetail, Dashboard, ImportPage, AuditPage
-    components/       Layout (sidebar + topbar)
-    hooks/useAuth.js  reads /.auth/me
-    api/client.js     fetch wrapper with 401 → AAD redirect
+    pages/
+      Login.jsx           sign-in form
+      ChangePassword.jsx  first-login + self-service password change
+      UsersPage.jsx       admin user management
+      ContractorsList.jsx
+      ContractorDetail.jsx
+      Dashboard.jsx
+      ImportPage.jsx
+      AuditPage.jsx
+    components/Layout.jsx sidebar + topbar (auth-gated)
+    hooks/useAuth.js      reads /api/auth/me
+    api/client.js         fetch wrapper with /login redirect on 401
 
-sql/schema.sql                       full DDL + seed data
-staticwebapp.config.json             Entra ID + per-route role gates
-.github/workflows/                   CI/CD to SWA
+sql/
+  schema.sql                       full DDL + seed data
+  migrations/
+    001_add_password_columns.sql   adds password auth to AppUsers
+
+staticwebapp.config.json           SPA fallback + security headers
+.github/workflows/                 CI/CD to SWA
 ```
 
-## Notes / next steps
+## Notes
 
-- The `vw_ContractorMonthlyINR` view is a long-format projection over the wide table — useful for charting without restructuring storage.
-- Excel import currently dedupes by HRMID and updates everything in a single transaction. For very large files (>10k rows) consider switching to a TVP-based bulk insert.
-- Audit log captures column-level diffs on UPDATE and a single `BULK_IMPORT` row per import. Add a retention job if it grows fast.
-- For schema changes, add migrations under `sql/migrations/` and apply them in deploy step.
+- **Lockout**: 5 failed login attempts locks the account for 15 minutes (configurable in `auth.js`).
+- **Session length**: 8 hours, configurable in `api/src/shared/jwt.js` (`EXPIRES_IN`).
+- **Password reset**: admin-driven only (no email flow). Admin clicks "Reset password" → new temp shown once → user must change on next login.
+- **Rotating JWT_SECRET**: invalidates *all* current sessions (everyone has to log in again). Do this if you suspect leakage.

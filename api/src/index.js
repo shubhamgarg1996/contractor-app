@@ -1,4 +1,6 @@
 // Functions v4 programming model — entry point that registers every function
+require('./functions/auth');
+require('./functions/users');
 require('./functions/contractors');
 require('./functions/lookups');
 require('./functions/dashboard');

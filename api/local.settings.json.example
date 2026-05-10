@@ -3,6 +3,8 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "node",
-    "SQL_CONN": "Server=tcp:<your-sql-server>.database.windows.net,1433;Database=ContractorDB;User Id=<sqluser>;Password=<sqlpassword>;Encrypt=true;TrustServerCertificate=false;Connection Timeout=30"
+    "NODE_ENV": "development",
+    "SQL_CONN": "Server=tcp:<your-sql-server>.database.windows.net,1433;Database=ContractorDB;User Id=<sqluser>;Password=<sqlpassword>;Encrypt=true;TrustServerCertificate=false;Connection Timeout=30",
+    "JWT_SECRET": "<generate-a-random-string-of-at-least-32-characters-here>"
   }
 }

@@ -5,10 +5,13 @@ async function api(path, opts = {}) {
       ...(isJson ? { 'Content-Type': 'application/json' } : {}),
       ...(opts.headers || {})
     },
+    credentials: 'same-origin',
     ...opts
   });
   if (res.status === 401) {
-    window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname);
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
     return null;
   }
   if (!res.ok) {
@@ -22,22 +25,37 @@ async function api(path, opts = {}) {
 }
 
 export const Api = {
-  list:      (qs = '') => api('/contractors' + (qs ? '?' + qs : '')),
-  get:       (id)      => api('/contractors/' + encodeURIComponent(id)),
-  create:    (data)    => api('/contractors',  { method: 'POST', body: JSON.stringify(data) }),
-  update:    (id, d)   => api('/contractors/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(d) }),
-  remove:    (id)      => api('/contractors/' + encodeURIComponent(id), { method: 'DELETE' }),
-  vendors:   ()        => api('/vendors'),
-  entities:  ()        => api('/entities'),
-  dashboard: ()        => api('/dashboard'),
-  audit:     (id)      => api('/audit/' + encodeURIComponent(id)),
-  importFile: (file)   => fetch('/api/import', {
+  // Auth
+  me:             ()                    => api('/auth/me'),
+  login:          (email, password)     => api('/auth/login',           { method:'POST', body: JSON.stringify({ email, password }) }),
+  logout:         ()                    => api('/auth/logout',          { method:'POST' }),
+  changePassword: (oldPassword, newPassword) => api('/auth/change-password', { method:'POST', body: JSON.stringify({ oldPassword, newPassword }) }),
+  bootstrap:      (email, password, displayName) => api('/auth/bootstrap', { method:'POST', body: JSON.stringify({ email, password, displayName }) }),
+
+  // User management (Admin)
+  listUsers:     ()             => api('/users'),
+  createUser:    (data)         => api('/users',  { method:'POST', body: JSON.stringify(data) }),
+  updateUser:    (email, data)  => api('/users/' + encodeURIComponent(email), { method:'PUT', body: JSON.stringify(data) }),
+  resetUserPwd:  (email)        => api('/users/' + encodeURIComponent(email) + '/reset-password', { method:'POST' }),
+
+  // Contractors
+  list:      (qs = '')  => api('/contractors' + (qs ? '?' + qs : '')),
+  get:       (id)       => api('/contractors/' + encodeURIComponent(id)),
+  create:    (data)     => api('/contractors',  { method: 'POST', body: JSON.stringify(data) }),
+  update:    (id, d)    => api('/contractors/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(d) }),
+  remove:    (id)       => api('/contractors/' + encodeURIComponent(id), { method: 'DELETE' }),
+  vendors:   ()         => api('/vendors'),
+  entities:  ()         => api('/entities'),
+  dashboard: ()         => api('/dashboard'),
+  audit:     (id)       => api('/audit/' + encodeURIComponent(id)),
+  importFile: (file)    => fetch('/api/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
-    body: file
+    body: file,
+    credentials: 'same-origin'
   }).then(async r => {
     if (r.status === 401) {
-      window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname);
+      window.location.href = '/login';
       return null;
     }
     if (!r.ok) throw new Error(await r.text());

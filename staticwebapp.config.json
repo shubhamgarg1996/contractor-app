@@ -1,40 +1,11 @@
 {
-  "auth": {
-    "identityProviders": {
-      "azureActiveDirectory": {
-        "registration": {
-          "openIdIssuer": "https://login.microsoftonline.com/<tenant-id>/v2.0",
-          "clientIdSettingName": "AAD_CLIENT_ID",
-          "clientSecretSettingName": "AAD_CLIENT_SECRET"
-        }
-      }
-    }
-  },
-  "routes": [
-    { "route": "/api/contractors",   "methods": ["GET"],            "allowedRoles": ["Admin","FinanceSPOC","Recruiter","Viewer"] },
-    { "route": "/api/contractors",   "methods": ["POST"],           "allowedRoles": ["Admin","FinanceSPOC","Recruiter"] },
-    { "route": "/api/contractors/*", "methods": ["GET"],            "allowedRoles": ["Admin","FinanceSPOC","Recruiter","Viewer"] },
-    { "route": "/api/contractors/*", "methods": ["PUT"],            "allowedRoles": ["Admin","FinanceSPOC","Recruiter"] },
-    { "route": "/api/contractors/*", "methods": ["DELETE"],         "allowedRoles": ["Admin"] },
-    { "route": "/api/import",                                        "allowedRoles": ["Admin"] },
-    { "route": "/api/export",                                        "allowedRoles": ["Admin","FinanceSPOC"] },
-    { "route": "/api/audit/*",                                       "allowedRoles": ["Admin"] },
-    { "route": "/api/dashboard",                                     "allowedRoles": ["Admin","FinanceSPOC","Recruiter","Viewer"] },
-    { "route": "/api/vendors",                                       "allowedRoles": ["Admin","FinanceSPOC","Recruiter","Viewer"] },
-    { "route": "/api/entities",                                      "allowedRoles": ["Admin","FinanceSPOC","Recruiter","Viewer"] },
-    { "route": "/login",  "rewrite":  "/.auth/login/aad" },
-    { "route": "/logout", "redirect": "/.auth/logout" },
-    { "route": "/*",                                                 "allowedRoles": ["authenticated"] }
-  ],
-  "responseOverrides": {
-    "401": { "redirect": "/login", "statusCode": 302 }
-  },
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/.auth/*", "/assets/*", "/*.{css,js,ico,png,jpg,jpeg,svg,woff,woff2}"]
+    "exclude": ["/api/*", "/assets/*", "/*.{css,js,ico,png,jpg,jpeg,svg,woff,woff2}"]
   },
   "globalHeaders": {
     "X-Frame-Options": "DENY",
-    "X-Content-Type-Options": "nosniff"
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
   }
 }

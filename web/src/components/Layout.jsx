@@ -1,16 +1,30 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth.js';
+import { Api } from '../api/client.js';
 
 export default function Layout() {
   const { user, loading, has } = useAuth();
+  const nav = useNavigate();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      nav('/login', { replace: true });
+      return;
+    }
+    if (user.mustChangePassword) {
+      nav('/change-password', { replace: true, state: { firstLogin: true } });
+    }
+  }, [user, loading, nav]);
+
+  async function logout() {
+    try { await Api.logout(); } catch {}
+    nav('/login', { replace: true });
+  }
 
   if (loading) return <div style={{ padding: 40 }}>Loading…</div>;
-
-  if (!user) {
-    // Not authenticated — bounce to AAD login
-    window.location.href = '/.auth/login/aad';
-    return null;
-  }
+  if (!user || user.mustChangePassword) return null;
 
   return (
     <div className="app">
@@ -19,12 +33,18 @@ export default function Layout() {
         <NavLink to="/contractors">Contractors</NavLink>
         <NavLink to="/dashboard">Dashboard</NavLink>
         {has('Admin') && <NavLink to="/import">Import</NavLink>}
+        {has('Admin') && <NavLink to="/users">Users</NavLink>}
       </aside>
       <main className="main">
         <div className="topbar">
           <div className="user">
             {user.email} · <span className="muted">{user.roles.join(', ') || 'no role'}</span>
-            {' · '}<a href="/.auth/logout">Sign out</a>
+            {' · '}
+            <a href="/change-password" onClick={(e) => { e.preventDefault(); nav('/change-password'); }}>
+              Change password
+            </a>
+            {' · '}
+            <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}>Sign out</a>
           </div>
         </div>
         <Outlet />
