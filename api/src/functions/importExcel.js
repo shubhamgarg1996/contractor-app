@@ -54,6 +54,48 @@ function unwrapCell(v) {
   return v === '' ? null : v;
 }
 
+// DB columns that must be numeric. Strings like "USD 13,200" are coerced
+// to 13200 (strip everything except digits, dot, minus). Unparseable → null.
+const NUMERIC_COLUMNS = new Set([
+  'Payment', 'MonthlyApproxINR', 'AnnualApproxINR',
+  'Jan25_Inv','Jan25_INR','Feb25_Inv','Feb25_INR','Mar25_Inv','Mar25_INR',
+  'Apr25_Inv','Apr25_INR','May25_Inv','May25_INR','Jun25_Inv','Jun25_INR',
+  'Jul25_Inv','Jul25_INR','Aug25_Inv','Aug25_INR','Sep25_Inv','Sep25_INR',
+  'Oct25_Inv','Oct25_INR','Nov25_Inv','Nov25_INR','Dec25_Inv','Dec25_INR',
+  'Jan26_Inv','Jan26_INR','Feb26_Inv','Feb26_INR','Mar26_Inv','Mar26_INR'
+]);
+
+const DATE_COLUMNS = new Set([
+  'DateOfJoining', 'ExitDate', 'LastRenewalEffectiveFrom', 'ContractEndDate'
+]);
+
+function tryNumber(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  const cleaned = v.replace(/[^0-9.\-]/g, '');
+  if (cleaned === '' || cleaned === '.' || cleaned === '-' || cleaned === '-.') return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function tryDate(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  const d = new Date(trimmed);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function coerce(dbCol, v) {
+  if (NUMERIC_COLUMNS.has(dbCol)) return tryNumber(v);
+  if (DATE_COLUMNS.has(dbCol))    return tryDate(v);
+  if (v === '') return null;
+  return v;
+}
+
 app.http('importContractors', {
   methods: ['POST'],
   route: 'import',
@@ -119,7 +161,7 @@ app.http('importContractors', {
         } else if (dbCol === 'EntityName') {
           obj.EntityID = v ? (emap.get(norm(v).toLowerCase()) ?? null) : null;
         } else {
-          obj[dbCol] = v;
+          obj[dbCol] = coerce(dbCol, v);
         }
       }
       rows.push(obj);
