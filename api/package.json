@@ -1,0 +1,17 @@
+{
+  "name": "contractor-api",
+  "version": "1.0.0",
+  "description": "Azure Functions API for the Contractor Tracker",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "mssql": "^11.0.1",
+    "exceljs": "^4.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

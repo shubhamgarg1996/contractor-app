@@ -1,0 +1,8 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "SQL_CONN": "Server=tcp:<your-sql-server>.database.windows.net,1433;Database=ContractorDB;User Id=<sqluser>;Password=<sqlpassword>;Encrypt=true;TrustServerCertificate=false;Connection Timeout=30"
+  }
+}
