@@ -68,7 +68,18 @@ app.http('importContractors', {
     try { await wb.xlsx.load(buf); }
     catch (e) { return { status: 400, jsonBody: { error: 'Could not read xlsx: ' + e.message } }; }
 
-    const ws = wb.worksheets[0];
+    // Pick the right sheet: prefer one named "Contractors", else any sheet
+    // with HRMID in row 1, else fall back to the first sheet.
+    const sheetHasHRMID = (s) => {
+      let found = false;
+      s.getRow(1).eachCell((cell) => {
+        if (norm(cell.value) === 'HRMID') found = true;
+      });
+      return found;
+    };
+    const ws = wb.getWorksheet('Contractors')
+            || wb.worksheets.find(sheetHasHRMID)
+            || wb.worksheets[0];
     if (!ws) return { status: 400, jsonBody: { error: 'No worksheet in file' } };
 
     // Map row 1 headers -> excel column index
