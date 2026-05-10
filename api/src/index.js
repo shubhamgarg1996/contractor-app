@@ -6,4 +6,5 @@ require('./functions/masters');
 require('./functions/dashboard');
 require('./functions/audit');
 require('./functions/importExcel');
+require('./functions/importTemplate');
 require('./functions/exportExcel');
