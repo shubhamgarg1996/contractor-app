@@ -2,7 +2,7 @@
 require('./functions/auth');
 require('./functions/users');
 require('./functions/contractors');
-require('./functions/lookups');
+require('./functions/masters');
 require('./functions/dashboard');
 require('./functions/audit');
 require('./functions/importExcel');

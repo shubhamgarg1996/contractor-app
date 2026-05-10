@@ -32,6 +32,7 @@ export default function Layout() {
         <h1>Contractor Tracker</h1>
         <NavLink to="/contractors">Contractors</NavLink>
         <NavLink to="/dashboard">Dashboard</NavLink>
+        {has('Admin','FinanceSPOC','Recruiter') && <NavLink to="/masters">Masters</NavLink>}
         {has('Admin') && <NavLink to="/import">Import</NavLink>}
         {has('Admin') && <NavLink to="/users">Users</NavLink>}
       </aside>

@@ -8,6 +8,7 @@ import Dashboard         from './pages/Dashboard.jsx';
 import ImportPage        from './pages/ImportPage.jsx';
 import AuditPage         from './pages/AuditPage.jsx';
 import UsersPage         from './pages/UsersPage.jsx';
+import MastersPage       from './pages/MastersPage.jsx';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="import"                element={<ImportPage />} />
         <Route path="audit/:hrmid"          element={<AuditPage />} />
         <Route path="users"                 element={<UsersPage />} />
+        <Route path="masters"               element={<MastersPage />} />
       </Route>
     </Routes>
   );

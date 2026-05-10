@@ -46,6 +46,13 @@ export const Api = {
   remove:    (id)       => api('/contractors/' + encodeURIComponent(id), { method: 'DELETE' }),
   vendors:   ()         => api('/vendors'),
   entities:  ()         => api('/entities'),
+  // Masters management
+  vendorsAll:    ()           => api('/vendors?includeInactive=true'),
+  createVendor:  (name)       => api('/vendors',  { method:'POST', body: JSON.stringify({ vendorName: name }) }),
+  updateVendor:  (id, data)   => api('/vendors/' + id, { method:'PUT', body: JSON.stringify(data) }),
+  entitiesAll:   ()           => api('/entities?includeInactive=true'),
+  createEntity:  (name)       => api('/entities', { method:'POST', body: JSON.stringify({ entityName: name }) }),
+  updateEntity:  (id, data)   => api('/entities/' + id, { method:'PUT', body: JSON.stringify(data) }),
   dashboard: ()         => api('/dashboard'),
   audit:     (id)       => api('/audit/' + encodeURIComponent(id)),
   importFile: (file)    => fetch('/api/import', {
