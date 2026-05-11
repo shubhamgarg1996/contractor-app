@@ -4,46 +4,82 @@ const { getPrincipal, hasRole, userEmail } = require('../shared/auth');
 const { ALL_COLUMNS } = require('../shared/columns');
 const ExcelJS = require('exceljs');
 
-// Maps the Excel header (as seen in the master tracker) to a DB column.
-// 'VendorName' / 'EntityName' are resolved to VendorID / EntityID below.
+// =====================================================
+// Excel header → DB column mapping
+// =====================================================
+// Scalar columns map to a DB column name.
+// Invoice columns map to an object { monthKey, kind: 'inv'|'inr' }
+// so we can route them into the long invoice table.
 const HEADER_MAP = {
-  'HRMID': 'HRMID',
-  'Name': 'Name',
-  'Vendor': 'VendorName',
-  'Status': 'Status',
-  'Entity': 'EntityName',
+  'HRMID': 'HRMID', 'Name': 'Name',
+  'Vendor': 'VendorName', 'Status': 'Status', 'Entity': 'EntityName',
   'Finance SPOC': 'FinanceSPOC',
-  'Date of Joining (as Cont)': 'DateOfJoining',
-  'Exit Date as Contractual': 'ExitDate',
-  'Currency': 'Currency',
-  'Payment': 'Payment',
-  'Hourly/monthly/per day': 'PaymentFrequency',
-  'Payment Terms': 'PaymentTerms',
+  'Date of Joining (as Cont)': 'DateOfJoining', 'Exit Date as Contractual': 'ExitDate',
+  'Currency': 'Currency', 'Payment': 'Payment',
+  'Hourly/monthly/per day': 'PaymentFrequency', 'Payment Terms': 'PaymentTerms',
   'Recruiter': 'Recruiter',
   'Last renewal/contract effective from': 'LastRenewalEffectiveFrom',
   'Contract End Date': 'ContractEndDate',
   'Monthly Approximate Amt. (INR)': 'MonthlyApproxINR',
   'Annual Approximate Amt. (INR)': 'AnnualApproxINR',
-  'Remarks': 'Remarks',
-  "Jan'25 Invoice Amount": 'Jan25_Inv', 'Jan (INR)': 'Jan25_INR',
-  "Feb'25 Invoice Amount": 'Feb25_Inv', 'Feb (INR)': 'Feb25_INR',
-  'March Invoice Amt.': 'Mar25_Inv',   'Mar (INR)': 'Mar25_INR',
-  'April Invoice Amt.': 'Apr25_Inv',   'Apr (INR)': 'Apr25_INR',
-  'May Invoice Amt.': 'May25_Inv',     'May (INR)': 'May25_INR',
-  'Jun Invoice Amt.': 'Jun25_Inv',     'Jun (INR)': 'Jun25_INR',
-  'Jul Invoice Amt.': 'Jul25_Inv',     'Jul (INR)': 'Jul25_INR',
-  'Aug Invoice Amt.': 'Aug25_Inv',     'Aug (INR)': 'Aug25_INR',
-  'Sep Invoice Amt.': 'Sep25_Inv',     'Sep (INR)': 'Sep25_INR',
-  'Oct Invoice Amt.': 'Oct25_Inv',     'Oct (INR)': 'Oct25_INR',
-  'Nov Invoice Amt.': 'Nov25_Inv',     'Nov (INR)': 'Nov25_INR',
-  'Dec Invoice Amt.': 'Dec25_Inv',     'Dec (INR)': 'Dec25_INR',
-  "Jan'26 Invoice Amt.": 'Jan26_Inv',  "Jan'26 (INR)": 'Jan26_INR',
-  "Feb'26 Invoice Amt.": 'Feb26_Inv',  "Feb'26 (INR)": 'Feb26_INR',
-  "Mar'26 Invoice Amt.": 'Mar26_Inv',  "Mar'26 (INR)": 'Mar26_INR'
+  'Remarks': 'Remarks'
 };
 
-const norm = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+// 12 short month names → month numbers
+const MONTH_NUM = {
+  Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12,
+  March:3, April:4
+};
 
+// Decide if a header is a monthly invoice column and produce { monthKey, kind }.
+// Handles:
+//   "Jan'25 Invoice Amount"       -> 2025-01 inv
+//   'Jan (INR)'                   -> 2025-01 inr  (no year → assume "current" 2025)
+//   "Jan'26 (INR)"                -> 2026-01 inr
+//   'March Invoice Amt.'          -> 2025-03 inv
+function classifyMonthHeader(raw, defaultYear) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+
+  // Month with quoted year: Jan'25, Feb'26 etc
+  let m = s.match(/^([A-Za-z]+)'(\d{2})\s*(.*)$/);
+  if (m) {
+    const month = MONTH_NUM[m[1]] || MONTH_NUM[capitalize(m[1])];
+    const yy = parseInt(m[2], 10);
+    if (!month) return null;
+    const fullYear = 2000 + yy;
+    const rest = m[3].toLowerCase();
+    const kind = rest.includes('inr') ? 'inr'
+              : rest.includes('invoice') || rest.includes('amt') ? 'inv'
+              : null;
+    if (!kind) return null;
+    return { monthKey: makeKey(fullYear, month), kind };
+  }
+
+  // Month with NO year: "Jan (INR)", "Mar (INR)", "May Invoice Amt.", "March Invoice Amt."
+  m = s.match(/^([A-Za-z]+)\s*(.*)$/);
+  if (m) {
+    const namePart = m[1];
+    const month = MONTH_NUM[namePart] || MONTH_NUM[capitalize(namePart)];
+    if (!month) return null;
+    const rest = m[2].toLowerCase();
+    const kind = rest.includes('inr') ? 'inr'
+              : rest.includes('invoice') || rest.includes('amt') ? 'inv'
+              : null;
+    if (!kind) return null;
+    return { monthKey: makeKey(defaultYear, month), kind };
+  }
+
+  return null;
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(); }
+function makeKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
+function norm(s)       { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
+
+// =====================================================
+// Cell helpers
+// =====================================================
 function unwrapCell(v) {
   if (v == null) return null;
   if (v && typeof v === 'object') {
@@ -54,17 +90,9 @@ function unwrapCell(v) {
   return v === '' ? null : v;
 }
 
-// DB columns that must be numeric. Strings like "USD 13,200" are coerced
-// to 13200 (strip everything except digits, dot, minus). Unparseable → null.
-const NUMERIC_COLUMNS = new Set([
-  'Payment', 'MonthlyApproxINR', 'AnnualApproxINR',
-  'Jan25_Inv','Jan25_INR','Feb25_Inv','Feb25_INR','Mar25_Inv','Mar25_INR',
-  'Apr25_Inv','Apr25_INR','May25_Inv','May25_INR','Jun25_Inv','Jun25_INR',
-  'Jul25_Inv','Jul25_INR','Aug25_Inv','Aug25_INR','Sep25_Inv','Sep25_INR',
-  'Oct25_Inv','Oct25_INR','Nov25_Inv','Nov25_INR','Dec25_Inv','Dec25_INR',
-  'Jan26_Inv','Jan26_INR','Feb26_Inv','Feb26_INR','Mar26_Inv','Mar26_INR'
+const NUMERIC_SCALAR_COLUMNS = new Set([
+  'Payment', 'MonthlyApproxINR', 'AnnualApproxINR'
 ]);
-
 const DATE_COLUMNS = new Set([
   'DateOfJoining', 'ExitDate', 'LastRenewalEffectiveFrom', 'ContractEndDate'
 ]);
@@ -74,28 +102,27 @@ function tryNumber(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v !== 'string') return null;
   const cleaned = v.replace(/[^0-9.\-]/g, '');
-  if (cleaned === '' || cleaned === '.' || cleaned === '-' || cleaned === '-.') return null;
+  if (cleaned === '' || cleaned === '.' || cleaned === '-') return null;
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
-
 function tryDate(v) {
   if (v == null) return null;
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
   if (typeof v !== 'string') return null;
-  const trimmed = v.trim();
-  if (!trimmed) return null;
-  const d = new Date(trimmed);
+  const d = new Date(v.trim());
   return Number.isNaN(d.getTime()) ? null : d;
 }
-
-function coerce(dbCol, v) {
-  if (NUMERIC_COLUMNS.has(dbCol)) return tryNumber(v);
-  if (DATE_COLUMNS.has(dbCol))    return tryDate(v);
+function coerceScalar(dbCol, v) {
+  if (NUMERIC_SCALAR_COLUMNS.has(dbCol)) return tryNumber(v);
+  if (DATE_COLUMNS.has(dbCol))           return tryDate(v);
   if (v === '') return null;
   return v;
 }
 
+// =====================================================
+// Endpoint
+// =====================================================
 app.http('importContractors', {
   methods: ['POST'],
   route: 'import',
@@ -110,8 +137,7 @@ app.http('importContractors', {
     try { await wb.xlsx.load(buf); }
     catch (e) { return { status: 400, jsonBody: { error: 'Could not read xlsx: ' + e.message } }; }
 
-    // Pick the right sheet: prefer one named "Contractors", else any sheet
-    // with HRMID in row 1, else fall back to the first sheet.
+    // Pick "Contractors" sheet, else any sheet with HRMID, else first.
     const sheetHasHRMID = (s) => {
       let found = false;
       s.getRow(1).eachCell((cell) => {
@@ -124,15 +150,24 @@ app.http('importContractors', {
             || wb.worksheets[0];
     if (!ws) return { status: 400, jsonBody: { error: 'No worksheet in file' } };
 
-    // Map row 1 headers -> excel column index
-    const colIndex = {};
+    // Walk headers: each column is either a scalar DB col, a monthly invoice,
+    // or unmapped. Year-less month headers default to 2025 (legacy template).
+    const scalarColIndex = {};                          // dbCol → excel col idx
+    const monthCols = [];                               // { idx, monthKey, kind }
     ws.getRow(1).eachCell((cell, idx) => {
-      const db = HEADER_MAP[norm(cell.value)];
-      if (db) colIndex[db] = idx;
+      const raw = norm(cell.value);
+      if (HEADER_MAP[raw]) {
+        scalarColIndex[HEADER_MAP[raw]] = idx;
+        return;
+      }
+      const m = classifyMonthHeader(raw, 2025);
+      if (m) monthCols.push({ idx, ...m });
     });
-    if (!colIndex.HRMID) return { status: 400, jsonBody: { error: 'HRMID column not found in row 1' } };
 
-    // Cache vendor & entity name -> id
+    if (!scalarColIndex.HRMID)
+      return { status: 400, jsonBody: { error: 'HRMID column not found in row 1' } };
+
+    // Cache vendor/entity name → id
     const pool = await getPool();
     const vmap = new Map(), emap = new Map();
     (await pool.request().query('SELECT VendorID, VendorName FROM dbo.Vendors')).recordset
@@ -140,50 +175,63 @@ app.http('importContractors', {
     (await pool.request().query('SELECT EntityID, EntityName FROM dbo.Entities')).recordset
       .forEach(r => emap.set(r.EntityName.toLowerCase(), r.EntityID));
 
-    // Parse rows + validate
+    // Parse rows
     const rows = [];
     const errors = [];
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const get = db => colIndex[db] ? unwrapCell(row.getCell(colIndex[db]).value) : null;
+      const getScalar = db => scalarColIndex[db]
+        ? unwrapCell(row.getCell(scalarColIndex[db]).value)
+        : null;
 
-      const hrmid = norm(get('HRMID'));
+      const hrmid = norm(getScalar('HRMID'));
       if (!hrmid) continue;
-      const name = norm(get('Name'));
+      const name = norm(getScalar('Name'));
       if (!name) { errors.push({ row: r, error: 'Missing Name' }); continue; }
 
-      const obj = { HRMID: hrmid, Name: name };
+      const scalar = { HRMID: hrmid, Name: name };
       for (const dbCol of new Set(Object.values(HEADER_MAP))) {
         if (dbCol === 'HRMID' || dbCol === 'Name') continue;
-        const v = get(dbCol);
-        if (dbCol === 'VendorName') {
-          obj.VendorID = v ? (vmap.get(norm(v).toLowerCase()) ?? null) : null;
-        } else if (dbCol === 'EntityName') {
-          obj.EntityID = v ? (emap.get(norm(v).toLowerCase()) ?? null) : null;
-        } else {
-          obj[dbCol] = coerce(dbCol, v);
-        }
+        const v = getScalar(dbCol);
+        if (dbCol === 'VendorName')
+          scalar.VendorID = v ? (vmap.get(norm(v).toLowerCase()) ?? null) : null;
+        else if (dbCol === 'EntityName')
+          scalar.EntityID = v ? (emap.get(norm(v).toLowerCase()) ?? null) : null;
+        else
+          scalar[dbCol] = coerceScalar(dbCol, v);
       }
-      rows.push(obj);
+
+      // Collect monthly invoices, grouping by monthKey
+      const monthly = new Map();  // monthKey → { inv, inr }
+      for (const mc of monthCols) {
+        const v = tryNumber(unwrapCell(row.getCell(mc.idx).value));
+        if (v == null) continue;
+        let bucket = monthly.get(mc.monthKey);
+        if (!bucket) { bucket = { inv: null, inr: null }; monthly.set(mc.monthKey, bucket); }
+        bucket[mc.kind] = v;
+      }
+
+      rows.push({ scalar, monthly });
     }
 
     if (errors.length) return { status: 400, jsonBody: { errors } };
 
-    // Upsert in a transaction
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
-      let inserted = 0, updated = 0;
-      for (const r of rows) {
-        const cols = ALL_COLUMNS.filter(c => r[c] !== undefined);
+      let inserted = 0, updated = 0, invoiceUpserts = 0;
+      const updatedBy = userEmail(principal);
+
+      for (const { scalar, monthly } of rows) {
+        const cols = ALL_COLUMNS.filter(c => scalar[c] !== undefined);
         const insertCols = ['HRMID', ...cols];
         const insertVals = insertCols.map(c => '@' + c).join(',');
         const setClause  = cols.map(c => `[${c}]=@${c}`).join(',');
 
         const req = new sql.Request(tx);
-        req.input('HRMID', sql.NVarChar(50), r.HRMID);
-        cols.forEach(c => req.input(c, r[c]));
-        req.input('UpdatedBy', sql.NVarChar(255), userEmail(principal));
+        req.input('HRMID', sql.NVarChar(50), scalar.HRMID);
+        cols.forEach(c => req.input(c, scalar[c]));
+        req.input('UpdatedBy', sql.NVarChar(255), updatedBy);
 
         const merge = await req.query(`
           MERGE dbo.Contractors AS T
@@ -198,16 +246,40 @@ app.http('importContractors', {
         if (action === 'INSERT') inserted++;
         else if (action === 'UPDATE') updated++;
 
+        // Upsert invoices for this contractor
+        for (const [monthKey, { inv, inr }] of monthly) {
+          await new sql.Request(tx)
+            .input('HRMID',    sql.NVarChar(50),  scalar.HRMID)
+            .input('MonthKey', sql.Char(7),       monthKey)
+            .input('InvAmt',   sql.Decimal(18,2), inv)
+            .input('INRAmt',   sql.Decimal(18,2), inr)
+            .input('By',       sql.NVarChar(255), updatedBy)
+            .query(`
+              MERGE dbo.ContractorMonthlyInvoice AS T
+              USING (SELECT @HRMID AS HRMID, @MonthKey AS MonthKey) AS S
+                ON T.HRMID = S.HRMID AND T.MonthKey = S.MonthKey
+              WHEN MATCHED THEN UPDATE SET
+                InvoiceAmount = @InvAmt, INRAmount = @INRAmt,
+                UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @By
+              WHEN NOT MATCHED THEN INSERT
+                (HRMID, MonthKey, InvoiceAmount, INRAmount, UpdatedAt, UpdatedBy)
+                VALUES (@HRMID, @MonthKey, @InvAmt, @INRAmt, SYSUTCDATETIME(), @By);`);
+          invoiceUpserts++;
+        }
+
+        // Audit line for the bulk import action
         await new sql.Request(tx)
-          .input('HRMID', sql.NVarChar(50), r.HRMID)
+          .input('HRMID', sql.NVarChar(50), scalar.HRMID)
           .input('Action', sql.NVarChar(20), action)
           .input('ChangedColumn', sql.NVarChar(100), 'BULK_IMPORT')
-          .input('ChangedBy', sql.NVarChar(255), userEmail(principal))
-          .query(`INSERT INTO dbo.AuditLog (HRMID,[Action],ChangedColumn,ChangedBy)
-                  VALUES (@HRMID,@Action,@ChangedColumn,@ChangedBy)`);
+          .input('NewValue', sql.NVarChar(sql.MAX), `Months upserted: ${monthly.size}`)
+          .input('ChangedBy', sql.NVarChar(255), updatedBy)
+          .query(`INSERT INTO dbo.AuditLog (HRMID,[Action],ChangedColumn,NewValue,ChangedBy)
+                  VALUES (@HRMID,@Action,@ChangedColumn,@NewValue,@ChangedBy)`);
       }
+
       await tx.commit();
-      return { jsonBody: { totalRows: rows.length, inserted, updated } };
+      return { jsonBody: { totalRows: rows.length, inserted, updated, invoiceUpserts } };
     } catch (e) {
       await tx.rollback();
       context.error('import failed', e);

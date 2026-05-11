@@ -55,6 +55,9 @@ export const Api = {
   updateEntity:  (id, data)   => api('/entities/' + id, { method:'PUT', body: JSON.stringify(data) }),
   dashboard: ()         => api('/dashboard'),
   audit:     (id)       => api('/audit/' + encodeURIComponent(id)),
+  invoices:     (id)            => api('/contractors/' + encodeURIComponent(id) + '/invoices'),
+  saveInvoices: (id, invoices)  => api('/contractors/' + encodeURIComponent(id) + '/invoices', {
+                                     method:'PUT', body: JSON.stringify({ invoices }) }),
   importFile: (file)    => fetch('/api/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
